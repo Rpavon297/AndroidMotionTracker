@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">Sensor capture</string>
+    <string name="capture_button">Capturar</string>
+</resources>
