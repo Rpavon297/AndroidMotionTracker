@@ -25,9 +25,6 @@ public class MainActivity extends AppCompatActivity {
     public void captureData(View view){
         Intent intent = new Intent(this, CaptureDataActivity.class);
 
-        String sample = "Lore ipsum";
-        intent.putExtra(this.EXTRA_MESSAGE, sample);
-
         startActivity(intent);
 
     }

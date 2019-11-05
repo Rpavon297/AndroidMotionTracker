@@ -9,8 +9,21 @@ import android.hardware.SensorEvent;
 import android.hardware.SensorEventListener;
 import android.hardware.SensorManager;
 import android.os.Bundle;
+import android.provider.SyncStateContract;
+import android.view.View;
 import android.view.Window;
 import android.widget.TextView;
+
+import org.eclipse.paho.android.service.MqttAndroidClient;
+import org.eclipse.paho.client.mqttv3.IMqttActionListener;
+import org.eclipse.paho.client.mqttv3.IMqttDeliveryToken;
+import org.eclipse.paho.client.mqttv3.IMqttToken;
+import org.eclipse.paho.client.mqttv3.MqttCallbackExtended;
+import org.eclipse.paho.client.mqttv3.MqttClient;
+import org.eclipse.paho.client.mqttv3.MqttConnectOptions;
+import org.eclipse.paho.client.mqttv3.MqttException;
+import org.eclipse.paho.client.mqttv3.MqttMessage;
+import org.eclipse.paho.client.mqttv3.MqttTopic;
 
 import static java.lang.Thread.sleep;
 
@@ -20,35 +33,103 @@ public class CaptureDataActivity extends AppCompatActivity implements SensorEven
     private SensorManager sensorManager;
     private double[] rotation;
     private double[] acceleration;
+    private Thread captureThread;
+    private String uri;
+    private final String mqttPass = "PFFVPUMW4TUF7BWO";
+    private final String mqttUser = "rpavon297";
+    private final String channelID = "885792";
+    private final String APIKey = "H6AYWB1DOU3UKGYB";
+
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         sensorManager = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
         rotation = new double[]{0.0, 0.0, 0.0};
         acceleration = new double[]{0.0, 0.0, 0.0};
+        uri = "tcp://thingspeak.com:1883";
 
         requestWindowFeature(Window.FEATURE_NO_TITLE);
 
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_capture_data);
 
-        capture();
+        startThread();
+
     }
 
-    private void capture() {
-       // while(true){
-            try {
-                sleep(100);
-            } catch (InterruptedException e) {
-                e.printStackTrace();
+    private void startThread(){
+        TextView textView = findViewById(R.id.status);
+        textView.setText("Connected to " + uri);
+
+        captureThread = new Thread(){
+            @Override
+            public void run() {
+                String clientId = MqttClient.generateClientId();
+                final MqttAndroidClient client = new MqttAndroidClient(getApplicationContext(), uri, clientId);
+                MqttConnectOptions mqttConnectOptions = new MqttConnectOptions();
+                mqttConnectOptions.setCleanSession(true);
+                mqttConnectOptions.setPassword(mqttPass.toCharArray());
+                mqttConnectOptions.setUserName(mqttUser);
+
+                try {
+                    client.connect(mqttConnectOptions).setActionCallback(new IMqttActionListener() {
+                        @Override
+                        public void onSuccess(IMqttToken iMqttToken) {
+                            try {
+                                while (!isInterrupted()) {
+                                    Thread.sleep(100);
+                                    runOnUiThread(new Runnable() {
+                                        @Override
+                                        public void run() {
+                                            String payload = "field1=" + acceleration[0] + "&" +
+                                                    "field2=" + acceleration[1] + "&" +
+                                                    "field3=" + acceleration[2] + "&" +
+                                                    "field4=" + rotation[0] + "&" +
+                                                    "field5=" + rotation[1] + "&" +
+                                                    "field6=" + rotation[2];
+                                            String topic= "channels/" + channelID + "/publish/" + APIKey;
+
+                                            try {
+                                                IMqttDeliveryToken token = client.publish(topic, payload.getBytes(), 0, false);
+                                            } catch (MqttException e) {
+                                                e.printStackTrace();
+                                            }
+                                            showValues();
+                                        }
+                                    });
+                                }
+                            } catch (Exception e) {
+
+                            }
+                        }
+
+                        @Override
+                        public void onFailure(IMqttToken iMqttToken, Throwable throwable) {
+                            System.out.println("");
+                        }
+                    });
+                } catch (MqttException e) {
+                    e.printStackTrace();
+                }
+
+
             }
+        };
 
-            String text = "Aceleración: x: " + acceleration[0] + " y: " + acceleration[1] + " z: " + acceleration[2]
-                    + "\n Rotación: x: " + rotation[0] + " y: " + rotation[1] + " z: " + rotation[2];
+        captureThread.start();
+        showValues();
+    }
 
-            TextView textView = findViewById(R.id.predictionText);
-            textView.setText(text);
-        //}
+    private void showValues() {
+        String text = "Aceleración: \nx: " + acceleration[0] + " \ny: " + acceleration[1] + " \nz: " + acceleration[2]
+                + "\n Rotación: \nx: " + rotation[0] + "\n y: " + rotation[1] + "\n z: " + rotation[2];
+
+        TextView textView = findViewById(R.id.predictionText);
+        textView.setText(text);
+    }
+
+    private void capture(){
+
     }
 
     private void getAccelerometer(SensorEvent event) {
@@ -81,6 +162,9 @@ public class CaptureDataActivity extends AppCompatActivity implements SensorEven
         sensorManager.registerListener(this,
                 sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER),
                 SensorManager.SENSOR_DELAY_NORMAL);
+        sensorManager.registerListener(this,
+                sensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE),
+                SensorManager.SENSOR_DELAY_NORMAL);
     }
 
     @Override
@@ -100,5 +184,11 @@ public class CaptureDataActivity extends AppCompatActivity implements SensorEven
     @Override
     public void onAccuracyChanged(Sensor sensor, int accuracy) {
 
+    }
+
+    public void stopCapturing(View view){
+        Intent intent = new Intent(this, MainActivity.class);
+        captureThread.interrupt();
+        startActivity(intent);
     }
 }
