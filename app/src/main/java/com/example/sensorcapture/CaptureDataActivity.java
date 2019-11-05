@@ -9,6 +9,7 @@ import android.hardware.SensorEvent;
 import android.hardware.SensorEventListener;
 import android.hardware.SensorManager;
 import android.os.Bundle;
+import android.os.Handler;
 import android.provider.SyncStateContract;
 import android.view.View;
 import android.view.Window;
@@ -34,7 +35,10 @@ public class CaptureDataActivity extends AppCompatActivity implements SensorEven
     private double[] rotation;
     private double[] acceleration;
     private Thread captureThread;
+    private Thread uiThread;
     private String uri;
+    private boolean connexion;
+    private boolean failed;
     private final String mqttPass = "PFFVPUMW4TUF7BWO";
     private final String mqttUser = "rpavon297";
     private final String channelID = "885792";
@@ -46,7 +50,9 @@ public class CaptureDataActivity extends AppCompatActivity implements SensorEven
         sensorManager = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
         rotation = new double[]{0.0, 0.0, 0.0};
         acceleration = new double[]{0.0, 0.0, 0.0};
-        uri = "tcp://thingspeak.com:1883";
+        uri = "tcp://mqtt.thingspeak.com:1883";
+        connexion = false;
+        failed = false;
 
         requestWindowFeature(Window.FEATURE_NO_TITLE);
 
@@ -54,13 +60,51 @@ public class CaptureDataActivity extends AppCompatActivity implements SensorEven
         setContentView(R.layout.activity_capture_data);
 
         startThread();
+        //refreshUi();
+    }
 
+    private void refreshUi(){
+        uiThread = new Thread(){
+            @Override
+            public void run(){
+
+                runOnUiThread(new Runnable() {
+
+                    @Override
+                    public void run() {
+                        while(!isInterrupted()) {
+                            try {
+                                sleep(1);
+                            } catch (InterruptedException e) {
+
+                            }
+                            if(!connexion && !failed){
+                                TextView textView = findViewById(R.id.status);
+                                textView.setText("Connecting to " + uri);
+                                textView.invalidate();
+                            }
+                            else if(connexion){
+                                TextView textView = findViewById(R.id.status);
+                                textView.setText("Connected to " + uri);
+                                textView.invalidate();
+
+                                showValues();
+                            }
+                            else{
+                                TextView textView = findViewById(R.id.status);
+                                textView.setText("Failed connexion to " + uri);
+                                textView.invalidate();
+                            }
+                        }
+                    }
+                });
+            }
+        };
+
+        uiThread.start();
     }
 
     private void startThread(){
-        TextView textView = findViewById(R.id.status);
-        textView.setText("Connected to " + uri);
-
         captureThread = new Thread(){
             @Override
             public void run() {
@@ -75,37 +119,22 @@ public class CaptureDataActivity extends AppCompatActivity implements SensorEven
                     client.connect(mqttConnectOptions).setActionCallback(new IMqttActionListener() {
                         @Override
                         public void onSuccess(IMqttToken iMqttToken) {
+                            connexion = true;
+                            failed = false;
+
                             try {
                                 while (!isInterrupted()) {
-                                    Thread.sleep(100);
-                                    runOnUiThread(new Runnable() {
-                                        @Override
-                                        public void run() {
-                                            String payload = "field1=" + acceleration[0] + "&" +
-                                                    "field2=" + acceleration[1] + "&" +
-                                                    "field3=" + acceleration[2] + "&" +
-                                                    "field4=" + rotation[0] + "&" +
-                                                    "field5=" + rotation[1] + "&" +
-                                                    "field6=" + rotation[2];
-                                            String topic= "channels/" + channelID + "/publish/" + APIKey;
-
-                                            try {
-                                                IMqttDeliveryToken token = client.publish(topic, payload.getBytes(), 0, false);
-                                            } catch (MqttException e) {
-                                                e.printStackTrace();
-                                            }
-                                            showValues();
-                                        }
-                                    });
+                                    Thread.sleep(1000);
+                                    publishValues(client);
                                 }
-                            } catch (Exception e) {
-
+                            } catch (Exception ignored) {
                             }
                         }
 
                         @Override
                         public void onFailure(IMqttToken iMqttToken, Throwable throwable) {
-                            System.out.println("");
+                            connexion = false;
+                            failed = true;
                         }
                     });
                 } catch (MqttException e) {
@@ -117,19 +146,39 @@ public class CaptureDataActivity extends AppCompatActivity implements SensorEven
         };
 
         captureThread.start();
-        showValues();
+    }
+
+    private void publishValues(MqttAndroidClient client) {
+        String payload = "field1=" + acceleration[0] + "&" +
+                "field2=" + acceleration[1] + "&" +
+                "field3=" + acceleration[2] + "&" +
+                "field4=" + rotation[0] + "&" +
+                "field5=" + rotation[1] + "&" +
+                "field6=" + rotation[2];
+        String topic= "channels/" + channelID + "/publish/" + APIKey;
+
+        try {
+            client.publish(topic, payload.getBytes(), 0, false);
+        } catch (MqttException e) {
+        }
     }
 
     private void showValues() {
-        String text = "Aceleración: \nx: " + acceleration[0] + " \ny: " + acceleration[1] + " \nz: " + acceleration[2]
-                + "\n Rotación: \nx: " + rotation[0] + "\n y: " + rotation[1] + "\n z: " + rotation[2];
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                TextView log= findViewById(R.id.status);
+                log.setText("Connected to" + uri);
+                log.invalidate();
 
-        TextView textView = findViewById(R.id.predictionText);
-        textView.setText(text);
-    }
+                String text = "Aceleración: \nx: " + acceleration[0] + " \ny: " + acceleration[1] + " \nz: " + acceleration[2]
+                        + "\n Rotación: \nx: " + rotation[0] + "\n y: " + rotation[1] + "\n z: " + rotation[2];
 
-    private void capture(){
-
+                TextView textView = findViewById(R.id.predictionText);
+                textView.setText(text);
+                textView.invalidate();
+            }
+        });
     }
 
     private void getAccelerometer(SensorEvent event) {
@@ -189,6 +238,7 @@ public class CaptureDataActivity extends AppCompatActivity implements SensorEven
     public void stopCapturing(View view){
         Intent intent = new Intent(this, MainActivity.class);
         captureThread.interrupt();
+        //uiThread.interrupt();
         startActivity(intent);
     }
 }
